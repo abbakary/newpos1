@@ -432,24 +432,12 @@ def started_order_detail(request, order_id):
             
             return redirect('tracker:started_orders_dashboard')
     
-    # Get related documents and extractions
-    documents = DocumentScan.objects.filter(order=order).order_by('-uploaded_at')
-    extractions = DocumentExtraction.objects.filter(
-        document__order=order
-    ).order_by('-extracted_at')
-    
-    # Get latest extraction for preview
-    latest_extraction = extractions.first()
-    
     active_tab = request.GET.get('tab', 'overview')
-    
+
     context = {
         'order': order,
         'customer': order.customer,
         'vehicle': order.vehicle,
-        'documents': documents,
-        'extractions': extractions,
-        'latest_extraction': latest_extraction,
         'active_tab': active_tab,
         'title': f'Order {order.order_number}',
     }
