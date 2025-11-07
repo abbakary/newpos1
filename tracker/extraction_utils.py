@@ -256,7 +256,7 @@ class InvoiceExtractor:
         amount_str = self.extract_field(text, 'amount')
         if not amount_str:
             return None
-        
+
         try:
             # Remove non-numeric characters except decimal point
             amount_str = re.sub(r'[^\d.]', '', amount_str)
@@ -264,6 +264,26 @@ class InvoiceExtractor:
         except Exception as e:
             logger.warning(f"Error parsing amount '{amount_str}': {str(e)}")
             return None
+
+    def extract_pi_no(self, text: str) -> Optional[str]:
+        """Extract Proforma Invoice Number (PI No)."""
+        return self.extract_field(text, 'pi_no')
+
+    def extract_invoice_date(self, text: str) -> Optional[str]:
+        """Extract invoice date from text."""
+        return self.extract_field(text, 'invoice_date')
+
+    def extract_del_date(self, text: str) -> Optional[str]:
+        """Extract delivery date from text."""
+        return self.extract_field(text, 'del_date')
+
+    def extract_customer_tel(self, text: str) -> Optional[str]:
+        """Extract customer telephone from text."""
+        return self.extract_field(text, 'customer_tel')
+
+    def extract_attended_by(self, text: str) -> Optional[str]:
+        """Extract attended by field from text."""
+        return self.extract_field(text, 'attended_by')
     
     def match_service_template(self, description: str) -> Optional[Tuple[str, int]]:
         """
