@@ -745,6 +745,10 @@ class InvoiceLineItem(models.Model):
     # Calculated
     line_total = models.DecimalField(max_digits=12, decimal_places=2, editable=False)
 
+    # Per-item VAT/Tax
+    tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0, help_text="Tax percentage for this line item")
+    tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
+
     # Tracking
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -753,6 +757,7 @@ class InvoiceLineItem(models.Model):
 
     def save(self, *args, **kwargs):
         self.line_total = self.quantity * self.unit_price
+        self.tax_amount = self.line_total * (self.tax_rate / 100) if self.tax_rate else Decimal('0')
         super().save(*args, **kwargs)
         # Recalculate invoice totals
         if self.invoice:
