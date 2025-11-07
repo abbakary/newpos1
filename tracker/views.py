@@ -1,4 +1,5 @@
 import json
+import logging
 from django import http
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse, HttpRequest, HttpResponse
@@ -39,6 +40,8 @@ from datetime import datetime, timedelta
 
 from django.contrib.auth.views import LogoutView
 from django.views.generic import View
+
+logger = logging.getLogger(__name__)
 
 
 def _mark_overdue_orders(hours=24):
@@ -1043,30 +1046,39 @@ def customer_register(request: HttpRequest):
                     return json_response(False, message="Please complete Step 1 (customer info) before saving.", message_type="error")
                 messages.error(request, "Please complete Step 1 (customer info) before saving.")
                 return redirect(f"{reverse('tracker:customer_register')}?step=1")
-            # Duplicate handling (same-branch exact identity)
+            # Duplicate handling and creation using centralized service
             from .utils import get_user_branch
+            from .services import CustomerService
             user_branch = get_user_branch(request.user)
-            existing = Customer.objects.filter(branch=user_branch, full_name__iexact=full_name, phone=phone).first()
-            if existing:
+
+            try:
+                c, created = CustomerService.create_or_get_customer(
+                    branch=user_branch,
+                    full_name=full_name,
+                    phone=phone,
+                    whatsapp=step1_data.get("whatsapp"),
+                    email=step1_data.get("email"),
+                    address=step1_data.get("address"),
+                    notes=step1_data.get("notes"),
+                    customer_type=step1_data.get("customer_type"),
+                    organization_name=step1_data.get("organization_name"),
+                    tax_number=step1_data.get("tax_number"),
+                    personal_subtype=step1_data.get("personal_subtype"),
+                )
+
+                if not created:
+                    # Customer already exists
+                    if is_ajax:
+                        dup_url = reverse("tracker:customer_detail", kwargs={'pk': c.id}) + "?flash=existing_customer"
+                        return json_response(False, message=f"Customer '{full_name}' already exists.", message_type="info", redirect_url=dup_url)
+                    messages.info(request, f"Customer '{full_name}' already exists. Redirected to their profile.")
+                    return redirect("tracker:customer_detail", pk=c.id)
+            except Exception as e:
+                logger.warning(f"Error creating customer in save_only flow: {e}")
                 if is_ajax:
-                    dup_url = reverse("tracker:customer_detail", kwargs={'pk': existing.id}) + "?flash=existing_customer"
-                    return json_response(False, message=f"Customer '{full_name}' already exists.", message_type="info", redirect_url=dup_url)
-                messages.info(request, f"Customer '{full_name}' already exists. Redirected to their profile.")
-                return redirect("tracker:customer_detail", pk=existing.id)
-            # Create new customer from step1 session
-            c = Customer.objects.create(
-                full_name=full_name,
-                phone=phone,
-                whatsapp=step1_data.get("whatsapp"),
-                email=step1_data.get("email"),
-                address=step1_data.get("address"),
-                notes=step1_data.get("notes"),
-                customer_type=step1_data.get("customer_type"),
-                organization_name=step1_data.get("organization_name"),
-                tax_number=step1_data.get("tax_number"),
-                personal_subtype=step1_data.get("personal_subtype"),
-                branch=user_branch,
-            )
+                    return json_response(False, message="Error creating customer. Please try again.", message_type="error")
+                messages.error(request, "Error creating customer. Please try again.")
+                return redirect(f"{reverse('tracker:customer_register')}?step=1")
             # Clear session step1 after save
             request.session.pop('reg_step1', None)
             if is_ajax:
@@ -1131,21 +1143,29 @@ def customer_register(request: HttpRequest):
                                     messages.info(request, 'A customer with the same details exists in another branch. A separate record will be created for your branch.')
                                     break
                     
-                        # If quick save, create the customer immediately
+                        # If quick save, create the customer immediately using centralized service
                         from .utils import get_user_branch
-                        c = Customer.objects.create(
-                            full_name=full_name,
-                            phone=phone,
-                            whatsapp=data.get("whatsapp"),
-                            email=data.get("email"),
-                            address=data.get("address"),
-                            notes=data.get("notes"),
-                            customer_type=data.get("customer_type"),
-                            organization_name=data.get("organization_name"),
-                            tax_number=data.get("tax_number"),
-                            personal_subtype=data.get("personal_subtype"),
-                            branch=get_user_branch(request.user)
-                        )
+                        from .services import CustomerService
+                        try:
+                            c, _ = CustomerService.create_or_get_customer(
+                                branch=get_user_branch(request.user),
+                                full_name=full_name,
+                                phone=phone,
+                                whatsapp=data.get("whatsapp"),
+                                email=data.get("email"),
+                                address=data.get("address"),
+                                notes=data.get("notes"),
+                                customer_type=data.get("customer_type"),
+                                organization_name=data.get("organization_name"),
+                                tax_number=data.get("tax_number"),
+                                personal_subtype=data.get("personal_subtype"),
+                            )
+                        except Exception as e:
+                            logger.warning(f"Error creating customer: {e}")
+                            if is_ajax:
+                                return json_response(False, form=form, message="Error creating customer", message_type="error")
+                            messages.error(request, "Error creating customer")
+                            return redirect(f"{reverse('tracker:customer_register')}?step=1")
 
                         # Clear session data after saving
                         if 'reg_step1' in request.session:
@@ -1362,20 +1382,28 @@ def customer_register(request: HttpRequest):
                     branch_name = getattr(other_branch, 'name', other_branch) if other_branch else 'another branch'
                     messages.warning(request, f"A customer with the same identity exists in {branch_name}. A separate customer will be created for your branch.")
 
-                # Create new customer
-                c = Customer.objects.create(
-                    full_name=full_name,
-                    phone=phone,
-                    whatsapp=data.get("whatsapp"),
-                    email=data.get("email"),
-                    address=data.get("address"),
-                    notes=data.get("notes") or data.get("additional_notes"),
-                    customer_type=data.get("customer_type"),
-                    organization_name=org_name,
-                    tax_number=tax_num,
-                    personal_subtype=data.get("personal_subtype"),
-                    branch=user_branch,
-                )
+                # Create new customer using centralized service
+                from .services import CustomerService
+                try:
+                    c, _ = CustomerService.create_or_get_customer(
+                        branch=user_branch,
+                        full_name=full_name,
+                        phone=phone,
+                        whatsapp=data.get("whatsapp"),
+                        email=data.get("email"),
+                        address=data.get("address"),
+                        notes=data.get("notes") or data.get("additional_notes"),
+                        customer_type=data.get("customer_type"),
+                        organization_name=org_name,
+                        tax_number=tax_num,
+                        personal_subtype=data.get("personal_subtype"),
+                    )
+                except Exception as e:
+                    logger.warning(f"Error creating customer at step 4: {e}")
+                    if is_ajax:
+                        return json_response(False, form=form, message="Error creating customer", message_type="error")
+                    messages.error(request, "Error creating customer")
+                    return render(request, "tracker/customer_register.html", get_template_context(4, form))
                 
                 # Create vehicle if vehicle information is provided
                 v = None
@@ -1388,16 +1416,17 @@ def customer_register(request: HttpRequest):
                 model = request.POST.get("model", "").strip()
                 vehicle_type = request.POST.get("vehicle_type", "").strip()
                 
-                # Create vehicle if any vehicle information is provided
+                # Create vehicle if any vehicle information is provided using centralized service
+                from .services import VehicleService
                 if plate_number or make or model or vehicle_type:
-                    v = Vehicle.objects.create(
+                    v = VehicleService.create_or_get_vehicle(
                         customer=c,
                         plate_number=plate_number or None,
                         make=make or None,
                         model=model or None,
                         vehicle_type=vehicle_type or None
                     )
-                
+
                 # Create order based on intent and service type
                 o = None
                 description = request.POST.get("description", "").strip()
@@ -2025,7 +2054,7 @@ def customer_groups(request: HttpRequest):
     # Calculate active customers this month (customers with orders in the last 30 days)
     one_month_ago = timezone.now() - timedelta(days=30)
     active_customers_this_month = scope_queryset(Customer.objects.all(), request.user, request).filter(
-        orders__created_at__gte=one_month_ago
+        last_visit__gte=one_month_ago
     ).distinct().count()
     
     # Customer type groups with detailed analytics
@@ -3639,7 +3668,7 @@ def analytics(request: HttpRequest):
         end_date = today
         labels = [(start_date + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(30)]
 
-    qs = scope_queryset(Order.objects.filter(created_at__date__gte=start_date, created_at__date__lte=end_date), request.user, request)
+    qs = scope_queryset(Order.objects.filter(created_at__date__gte=start_date, created_at__date__lte=end_date).select_related('customer'), request.user, request)
     status_counts = {row['status']: row['c'] for row in qs.values('status').annotate(c=Count('id'))}
     type_counts = {row['type']: row['c'] for row in qs.values('type').annotate(c=Count('id'))}
     priority_counts = {row['priority']: row['c'] for row in qs.values('priority').annotate(c=Count('id'))}
@@ -4037,7 +4066,7 @@ def reports_export_pdf(request: HttpRequest):
     elements.append(Spacer(1, 12))
 
     # Footer text with branding
-    footer_text = 'superdoll — Generated by superdoll.innovation Team'
+    footer_text = 'superdoll �� Generated by superdoll.innovation Team'
 
     # Build PDF
     def _add_page_footer(canvas, doc):
@@ -5238,38 +5267,32 @@ def customers_quick_create(request: HttpRequest):
             if not full_name or not phone:
                 return JsonResponse({'success': False, 'message': 'Name and phone are required'})
 
-            # Normalize phone number (remove all non-digit characters)
-            import re
-            normalized_phone = re.sub(r'\D', '', phone)
-            
-            # Check for existing customers with similar name and phone (scope to user's accessible customers)
-            existing_customers = scope_queryset(Customer.objects.filter(full_name__iexact=full_name), request.user, request)
-            
-            # Check each potential match for phone number similarity
-            for customer in existing_customers:
-                # Normalize stored phone number for comparison
-                stored_phone = re.sub(r'\D', '', str(customer.phone))
-                # Check for exact or partial match (at least 6 digits matching)
-                if len(normalized_phone) >= 6 and len(stored_phone) >= 6:
-                    if normalized_phone in stored_phone or stored_phone in normalized_phone:
-                        return JsonResponse({
-                            'success': False, 
-                            'message': f'A similar customer already exists: {customer.full_name} ({customer.phone})',
-                            'customer_id': customer.id,
-                            'customer_name': customer.full_name,
-                            'customer_phone': str(customer.phone)
-                        })
-
-            # Create customer (assign to user's branch if applicable)
+            # Create customer using centralized service (handles deduplication automatically)
             from .utils import get_user_branch
+            from .services import CustomerService
             customer_branch = get_user_branch(request.user)
-            customer = Customer.objects.create(
-                full_name=full_name,
-                phone=phone,
-                email=email if email else None,
-                customer_type=customer_type,
-                branch=customer_branch
-            )
+
+            try:
+                customer, created = CustomerService.create_or_get_customer(
+                    branch=customer_branch,
+                    full_name=full_name,
+                    phone=phone,
+                    email=email if email else None,
+                    customer_type=customer_type,
+                )
+
+                # If customer already existed, return that info
+                if not created:
+                    return JsonResponse({
+                        'success': False,
+                        'message': f'A similar customer already exists: {customer.full_name} ({customer.phone})',
+                        'customer_id': customer.id,
+                        'customer_name': customer.full_name,
+                        'customer_phone': str(customer.phone)
+                    })
+            except Exception as e:
+                logger.warning(f"Error creating customer in quick_create: {e}")
+                return JsonResponse({'success': False, 'message': f'Error creating customer: {str(e)}'})
 
             try:
                 add_audit_log(request.user, 'customer_create', f"Created customer {customer.full_name} ({customer.code})")
@@ -6019,7 +6042,7 @@ def analytics_customer(request: HttpRequest):
     top_customers = (
         scope_queryset(Customer.objects.all(), request.user, request).annotate(order_count=Count("orders"), latest_order_date=Max("orders__created_at"))
         .filter(order_count__gt=0)
-        .order_by("-order_count")[:10]
+        .order_by("-total_visits", "-total_spent")[:10]
     )
 
     charts = {

@@ -22,17 +22,79 @@ logger = logging.getLogger(__name__)
 
 
 @login_required
+@require_http_methods(["GET"])
+def api_search_started_orders(request):
+    """
+    API endpoint to search for started orders by vehicle plate number.
+    Used for autocomplete/dropdown in invoice creation form.
+
+    Query parameters:
+    - plate: vehicle plate number (required)
+
+    Returns JSON with list of available started orders
+    """
+    from django.http import JsonResponse
+    from .services import OrderService
+
+    plate = (request.GET.get('plate') or '').strip().upper()
+    if not plate:
+        return JsonResponse({'success': False, 'message': 'Plate number required', 'orders': []})
+
+    try:
+        user_branch = get_user_branch(request.user)
+        orders = OrderService.find_all_started_orders_for_plate(user_branch, plate)
+
+        orders_data = []
+        for order in orders:
+            orders_data.append({
+                'id': order.id,
+                'order_number': order.order_number or f"ORD{order.id}",
+                'plate_number': order.vehicle.plate_number if order.vehicle else plate,
+                'customer': {
+                    'id': order.customer.id,
+                    'name': order.customer.full_name,
+                    'phone': order.customer.phone
+                } if order.customer else None,
+                'started_at': order.started_at.isoformat() if order.started_at else order.created_at.isoformat(),
+                'type': order.type,
+                'status': order.status
+            })
+
+        return JsonResponse({
+            'success': True,
+            'orders': orders_data,
+            'count': len(orders_data)
+        })
+    except Exception as e:
+        logger.warning(f"Error searching started orders by plate: {e}")
+        return JsonResponse({'success': False, 'message': str(e), 'orders': []})
+
+
+@login_required
 def invoice_create(request, order_id=None):
-    """Create a new invoice, optionally linked to an existing order"""
+    """Create a new invoice, optionally linked to an existing started order"""
+    from .services import CustomerService, VehicleService, OrderService
+
     order = None
     customer = None
     vehicle = None
-    
+    started_orders = []
+    plate_search = request.GET.get('plate', '').strip().upper()
+
+    user_branch = get_user_branch(request.user)
+
+    # If searching by plate, find all started orders for that plate
+    if plate_search:
+        started_orders = OrderService.find_all_started_orders_for_plate(user_branch, plate_search)
+
+    # If order_id is provided, load that order
     if order_id:
-        order = get_object_or_404(Order, pk=order_id)
+        order = get_object_or_404(Order, pk=order_id, branch=user_branch)
         customer = order.customer
         vehicle = order.vehicle
-    
+        # Mark it so we know it's a linked started order
+        plate_search = vehicle.plate_number if vehicle else ''
+
     if request.method == 'POST':
         try:
             form = InvoiceForm(request.POST, user=request.user)
@@ -41,6 +103,23 @@ def invoice_create(request, order_id=None):
             form = InvoiceForm(request.POST)
         if form.is_valid():
             cd = form.cleaned_data
+
+            # Check if user selected a started order to link to
+            selected_order_id = cd.get('selected_order_id') or request.POST.get('selected_order_id')
+            if selected_order_id and not order:
+                try:
+                    order = Order.objects.get(id=selected_order_id, branch=user_branch, status='created')
+                except Order.DoesNotExist:
+                    messages.error(request, 'Selected started order not found.')
+                    return render(request, 'tracker/invoice_create.html', {
+                        'form': form,
+                        'order': order,
+                        'customer': customer,
+                        'vehicle': vehicle,
+                        'started_orders': started_orders,
+                        'plate_search': plate_search,
+                    })
+
             # Resolve or create customer
             customer_obj = None
             try:
@@ -49,37 +128,25 @@ def invoice_create(request, order_id=None):
                 else:
                     name = (cd.get('customer_full_name') or '').strip()
                     phone = (cd.get('customer_phone') or '').strip()
-                    whatsapp = (cd.get('customer_whatsapp') or '').strip()
-                    email = (cd.get('customer_email') or '').strip()
-                    address = (cd.get('customer_address') or '').strip()
-                    org = (cd.get('customer_organization_name') or '').strip()
-                    tax = (cd.get('customer_tax_number') or '').strip()
-                    ctype = cd.get('customer_type') or None
 
-                    if name:
-                        from django.db import IntegrityError
-                        from .utils import get_user_branch as _get_user_branch
-                        branch = _get_user_branch(request.user)
-                        personal_sub = cd.get('customer_personal_subtype') or None
+                    if name and phone:
+                        branch = user_branch
                         try:
-                            customer_obj = Customer.objects.create(
-                                full_name=name,
-                                phone=phone or '',
-                                whatsapp=whatsapp or None,
-                                email=email or None,
-                                address=address or None,
-                                organization_name=org or None,
-                                tax_number=tax or None,
-                                customer_type=ctype or None,
-                                personal_subtype=personal_sub,
+                            customer_obj, _ = CustomerService.create_or_get_customer(
                                 branch=branch,
+                                full_name=name,
+                                phone=phone,
+                                whatsapp=(cd.get('customer_whatsapp') or '').strip() or None,
+                                email=(cd.get('customer_email') or '').strip() or None,
+                                address=(cd.get('customer_address') or '').strip() or None,
+                                organization_name=(cd.get('customer_organization_name') or '').strip() or None,
+                                tax_number=(cd.get('customer_tax_number') or '').strip() or None,
+                                customer_type=cd.get('customer_type') or None,
+                                personal_subtype=cd.get('customer_personal_subtype') or None,
                             )
-                        except IntegrityError:
-                            # If unique constraint prevents creation, try to fetch an existing record matching key fields
-                            customer_obj = Customer.objects.filter(branch=branch, full_name__iexact=name, phone=phone).first()
-                            if not customer_obj:
-                                # As a last resort, attempt to get by name only
-                                customer_obj = Customer.objects.filter(branch=branch, full_name__iexact=name).first()
+                        except Exception as e:
+                            logger.warning(f"Failed to create/get customer while creating invoice: {e}")
+                            customer_obj = None
             except Exception as e:
                 logger.warning(f"Failed to resolve or create customer while creating invoice: {e}")
 
@@ -88,7 +155,7 @@ def invoice_create(request, order_id=None):
                 customer_obj = customer
 
             invoice = form.save(commit=False)
-            invoice.branch = get_user_branch(request.user)
+            invoice.branch = user_branch
             if order:
                 invoice.order = order
             invoice.customer = customer_obj
@@ -107,42 +174,44 @@ def invoice_create(request, order_id=None):
             except Exception:
                 pass
             invoice.save()
-            # If this invoice was created from an order and service selection/ETA provided, update the order for tracking
+
+            # If this invoice was created from a started order, update the order with finalized details
             try:
                 if order:
-                    # Keep order's customer in sync with the customer chosen/created on the invoice
-                    try:
-                        if customer_obj and order.customer_id != getattr(customer_obj, 'id', None):
-                            order.customer = customer_obj
-                    except Exception:
-                        pass
+                    # Use the new OrderService to update the started order with invoice details
+                    order = OrderService.update_order_from_invoice(
+                        order=order,
+                        customer=customer_obj,
+                        vehicle=vehicle,
+                        description=request.POST.get('order_description') or order.description
+                    )
+
+                    # Also handle service selection/ETA if provided
                     sel = request.POST.get('service_selection')
                     est = request.POST.get('estimated_duration')
-                    if sel:
-                        # expected JSON array from client
-                        try:
-                            names = json.loads(sel)
-                        except Exception:
-                            # fallback to comma-separated
-                            names = [s.strip() for s in str(sel).split(',') if s.strip()]
-                        if names:
-                            # Append services/add-ons to order.description (not shown on invoice)
-                            base_desc = order.description or ''
-                            svc_text = ', '.join(names)
-                            lines = [l for l in base_desc.split('\n') if not (l.strip().lower().startswith('services:') or l.strip().lower().startswith('add-ons:') or l.strip().lower().startswith('tire services:'))]
-                            if order.type == 'sales':
-                                lines.append(f"Tire Services: {svc_text}")
-                            else:
-                                lines.append(f"Services: {svc_text}")
-                            order.description = '\n'.join([l for l in lines if l.strip()])
-                    if est:
-                        try:
-                            order.estimated_duration = int(est)
-                        except Exception:
-                            pass
-                    order.save()
+                    if sel or est:
+                        if sel:
+                            try:
+                                names = json.loads(sel)
+                            except Exception:
+                                names = [s.strip() for s in str(sel).split(',') if s.strip()]
+                            if names:
+                                base_desc = order.description or ''
+                                svc_text = ', '.join(names)
+                                lines = [l for l in base_desc.split('\n') if not (l.strip().lower().startswith('services:') or l.strip().lower().startswith('add-ons:') or l.strip().lower().startswith('tire services:'))]
+                                if order.type == 'sales':
+                                    lines.append(f"Tire Services: {svc_text}")
+                                else:
+                                    lines.append(f"Services: {svc_text}")
+                                order.description = '\n'.join([l for l in lines if l.strip()])
+                        if est:
+                            try:
+                                order.estimated_duration = int(est)
+                            except Exception:
+                                pass
+                        order.save()
             except Exception as e:
-                logger.warning(f"Failed to update order with service selection/ETA: {e}")
+                logger.warning(f"Failed to update order with invoice details: {e}")
 
             messages.success(request, f'Invoice {invoice.invoice_number} created successfully.')
             return redirect('tracker:invoice_detail', pk=invoice.pk)
@@ -246,9 +315,10 @@ def invoice_list(request, order_id=None):
 def invoice_print(request, pk):
     """Display invoice in print-friendly format"""
     invoice = get_object_or_404(Invoice, pk=pk)
-    return render(request, 'tracker/invoice_print.html', {
+    context = {
         'invoice': invoice,
-    })
+    }
+    return render(request, 'tracker/invoice_print.html', context)
 
 
 @login_required
@@ -256,16 +326,26 @@ def invoice_print(request, pk):
 def invoice_pdf(request, pk):
     """Generate and download invoice as PDF"""
     invoice = get_object_or_404(Invoice, pk=pk)
-    
+
     try:
         from django.template.loader import render_to_string
         from weasyprint import HTML, CSS
         import io
-        
-        html_string = render_to_string('tracker/invoice_print.html', {'invoice': invoice})
-        html = HTML(string=html_string)
+        import os
+
+        logo_left_path = os.path.join(os.path.dirname(__file__), '..', 'tracker', 'static', 'assets', 'images', 'logo', 'stm_logo.png')
+        logo_right_path = os.path.join(os.path.dirname(__file__), '..', 'tracker', 'static', 'assets', 'images', 'logo', 'wecare.png')
+
+        context = {
+            'invoice': invoice,
+            'logo_left_url': f'file://{os.path.abspath(logo_left_path)}',
+            'logo_right_url': f'file://{os.path.abspath(logo_right_path)}',
+        }
+
+        html_string = render_to_string('tracker/invoice_print.html', context)
+        html = HTML(string=html_string, base_url=request.build_absolute_uri('/'))
         pdf = html.write_pdf()
-        
+
         response = HttpResponse(pdf, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="Invoice_{invoice.invoice_number}.pdf"'
         return response

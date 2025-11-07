@@ -358,10 +358,18 @@
     <!-- Logos at the bottom -->
     <div class="logo-container">
       <div class="logo-left">
-        <img src="{% static 'assets/images/logo/stm_logo.png' %}" alt="STM Logo">
+        {% if logo_left_url %}
+          <img src="{{ logo_left_url }}" alt="STM Logo">
+        {% else %}
+          <img src="{% static 'assets/images/logo/stm_logo.png' %}" alt="STM Logo">
+        {% endif %}
       </div>
       <div class="logo-right">
-        <img src="{% static 'assets/images/logo/wecare.png' %}" alt="WeCare Logo">
+        {% if logo_right_url %}
+          <img src="{{ logo_right_url }}" alt="WeCare Logo">
+        {% else %}
+          <img src="{% static 'assets/images/logo/wecare.png' %}" alt="WeCare Logo">
+        {% endif %}
       </div>
     </div>
   </div>

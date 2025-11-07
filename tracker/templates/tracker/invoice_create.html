@@ -72,17 +72,53 @@
         <div class="card-body">
           <form method="post" novalidate>
             {% csrf_token %}
-            
+
             <style>
       .company-block { background: #ffd400; padding: 12px; border-radius: 6px; color: #222; margin-bottom: 18px; }
       .invoice-preview-box { border: 1px solid #e6e6e6; padding: 12px; border-radius: 6px; background: #f8f9fb; }
       .invoice-preview-row { display:flex; justify-content:space-between; padding:6px 0; font-size:14px }
       .invoice-preview-row strong{ font-weight:700 }
+      .linked-order-badge { background: #28a745; color: white; padding: 6px 12px; border-radius: 4px; display: inline-block; margin-bottom: 12px; }
+      .started-orders-dropdown { display: none; margin-top: 12px; padding: 12px; background: #f0f7ff; border-left: 4px solid #0d6efd; border-radius: 4px; }
+      .started-orders-dropdown.active { display: block; }
     </style>
 
     <div class="company-block">
       <strong>Superdoll Trailer Manufacture Co. (T) Ltd.</strong><br>
       P.O. Box 16541 DSM, Tel. +255-22-2860930-2863467, Fax +255-22-2865412/3, Email: stm@superdoll-tz.com, Tax ID No.100-199-157, VAT Reg. No.10-0085-15-E
+    </div>
+
+    <!-- Linking status message (shown when order is selected) -->
+    {% if order %}
+    <div class="linked-order-badge" id="linkingStatus">
+      <i class="fa fa-link me-2"></i>Linking to started order #{{ order.order_number }}
+      {% if order.started_at %}
+      (Started: {{ order.started_at|date:"d/m/Y H:i" }})
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="card mb-3">
+      <div class="card-header bg-light">
+        <h6 class="mb-0">Find Started Order (Optional)</h6>
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Vehicle Plate Number</label>
+            {{ form.plate_number }}
+            <small class="text-muted d-block">Enter the vehicle plate to find and link an existing started order. This is optional - you can create a new invoice if no order exists.</small>
+          </div>
+          <div class="col-md-6" id="ordersDropdownContainer" style="display:none;">
+            <label class="form-label">Available Started Orders</label>
+            <select name="selected_order_id_select" id="startedOrdersSelect" class="form-select">
+              <option value="">-- Create New Order --</option>
+            </select>
+            <small class="text-muted d-block">Select an order to link this invoice to it. The order's customer details will be loaded.</small>
+          </div>
+        </div>
+        {{ form.selected_order_id }}
+      </div>
     </div>
 
     <div class="card mb-3">
@@ -417,6 +453,67 @@
                   .catch(err=>{ console.error('Failed to load services/items for invoice:', err); svcContainer.innerHTML='<div class="text-danger">Failed to load services</div>'; salesContainer.innerHTML=''; });
 
               });
+
+              // Plate search and started orders lookup
+              const plateSearchInput = document.querySelector('[name="plate_number"]');
+              const ordersDropdownContainer = document.getElementById('ordersDropdownContainer');
+              const startedOrdersSelect = document.getElementById('startedOrdersSelect');
+              const selectedOrderIdField = document.querySelector('[name="selected_order_id"]');
+              const selectedOrderIdSelectField = document.querySelector('[name="selected_order_id_select"]');
+
+              if (plateSearchInput) {
+                plateSearchInput.addEventListener('input', function() {
+                  const plate = this.value.trim().toUpperCase();
+
+                  if (plate.length > 2) {
+                    // Fetch started orders for this plate
+                    fetch('{% url "tracker:api_search_started_orders" %}?plate=' + encodeURIComponent(plate), {
+                      headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                    })
+                    .then(r => r.json())
+                    .then(data => {
+                      if (data.success && data.orders && data.orders.length > 0) {
+                        // Populate dropdown
+                        startedOrdersSelect.innerHTML = '<option value="">-- Create New Order --</option>';
+                        data.orders.forEach(order => {
+                          const started = new Date(order.started_at);
+                          const startedStr = started.toLocaleString('en-US', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'});
+                          const option = document.createElement('option');
+                          option.value = order.id;
+                          option.textContent = `#${order.order_number} - ${order.customer ? order.customer.name : 'Unknown'} (Started: ${startedStr})`;
+                          startedOrdersSelect.appendChild(option);
+                        });
+
+                        // Show dropdown
+                        ordersDropdownContainer.classList.add('active');
+                        ordersDropdownContainer.style.display = 'block';
+                      } else {
+                        // No orders found
+                        startedOrdersSelect.innerHTML = '<option value="">-- No existing orders found, will create new --</option>';
+                        ordersDropdownContainer.classList.add('active');
+                        ordersDropdownContainer.style.display = 'block';
+                      }
+                    })
+                    .catch(err => {
+                      console.error('Failed to search started orders:', err);
+                      ordersDropdownContainer.style.display = 'none';
+                    });
+                  } else {
+                    // Hide dropdown if plate too short
+                    ordersDropdownContainer.style.display = 'none';
+                    ordersDropdownContainer.classList.remove('active');
+                  }
+                });
+              }
+
+              // On order selection, populate the hidden selected_order_id field
+              if (selectedOrderIdSelectField) {
+                selectedOrderIdSelectField.addEventListener('change', function() {
+                  if (selectedOrderIdField) {
+                    selectedOrderIdField.value = this.value || '';
+                  }
+                });
+              }
             </script>
           </form>
         </div>

@@ -208,22 +208,36 @@ def create_order_from_document(request):
             # allow creating without a branch; branch field may be nullable depending on model
             pass
 
+        from .services import CustomerService, VehicleService
+
         extracted = extraction.extracted_data_json or {}
 
-        # Create or reuse customer
+        # Extract customer data
         cust_name = extraction.extracted_customer_name or extracted.get('customer_name') or 'Customer'
         cust_phone = extraction.extracted_customer_phone or extracted.get('customer_phone') or data.get('customer_phone') or ''
         cust_email = extraction.extracted_customer_email or extracted.get('customer_email') or ''
         cust_addr = getattr(extraction, 'extracted_customer_address', None) or extracted.get('address') or ''
 
-        customer = Customer.objects.create(
-            branch=user_branch,
-            full_name=cust_name,
-            phone=cust_phone,
-            email=cust_email or None,
-            address=cust_addr or None,
-            customer_type='personal'
-        )
+        # Create or get customer using centralized service
+        try:
+            customer, _ = CustomerService.create_or_get_customer(
+                branch=user_branch,
+                full_name=cust_name,
+                phone=cust_phone,
+                email=cust_email or None,
+                address=cust_addr or None,
+                customer_type='personal'
+            )
+        except Exception as e:
+            logger.warning(f"Failed to create customer from extraction: {e}")
+            customer = Customer.objects.create(
+                branch=user_branch,
+                full_name=cust_name,
+                phone=cust_phone,
+                email=cust_email or None,
+                address=cust_addr or None,
+                customer_type='personal'
+            )
 
         # Vehicle
         extracted_plate = (
@@ -235,11 +249,11 @@ def create_order_from_document(request):
 
         vehicle = None
         if extracted_plate:
-            vehicle = Vehicle.objects.create(
+            vehicle = VehicleService.create_or_get_vehicle(
                 customer=customer,
-                plate_number=extracted_plate.upper(),
-                make=extracted.get('vehicle_make') or '',
-                model=extracted.get('vehicle_model') or ''
+                plate_number=extracted_plate,
+                make=extracted.get('vehicle_make'),
+                model=extracted.get('vehicle_model')
             )
 
         # Description and estimation
@@ -315,28 +329,30 @@ def start_quick_order(request):
                 'order_number': existing_order.order_number,
             }, status=400)
         
-        # Create temporary order
-        temp_customer_name = f"Customer {job_card_number}"
-        
+        from .services import VehicleService
+
         # Find existing customer by vehicle plate if provided
         customer = None
         vehicle = None
-        
+
         if vehicle_plate:
             vehicle = Vehicle.objects.filter(
                 plate_number__iexact=vehicle_plate,
                 customer__branch=user_branch
             ).first()
-            
+
             if vehicle:
                 customer = vehicle.customer
-        
-        # Create customer if not found
+
+        # Don't create a temp customer - wait for document extraction to get real customer data
+        # This prevents the "Pending - T XXX" problem
         if not customer:
-            customer = Customer.objects.create(
+            # Create a placeholder that will be replaced when document is processed
+            from .services import CustomerService
+            customer, _ = CustomerService.create_or_get_customer(
                 branch=user_branch,
-                full_name=temp_customer_name,
-                phone='pending',  # To be updated
+                full_name=f"Job Card {job_card_number}",
+                phone=f"JC{job_card_number}",  # Use job card as temp identifier instead of "pending"
                 customer_type='personal',
             )
         

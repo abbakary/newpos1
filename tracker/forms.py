@@ -1209,6 +1209,24 @@ except Exception:
 
 class InvoiceForm(forms.ModelForm):
     # Inline customer fields to allow creating or selecting a customer while creating an invoice
+    # Plate search: find existing started orders to link to
+    plate_number = forms.CharField(
+        required=False,
+        label="Vehicle Plate Number (Search for existing started orders)",
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Enter plate (e.g., T 290)',
+            'data-role': 'plate-search',
+            'autocomplete': 'off'
+        })
+    )
+    # Selected started order ID: which order to link this invoice to
+    selected_order_id = forms.IntegerField(
+        required=False,
+        widget=forms.HiddenInput(),
+        label="Selected Started Order"
+    )
+
     existing_customer = forms.ModelChoiceField(queryset=None, required=False, widget=forms.Select(attrs={'class': 'form-select'}))
     customer_full_name = forms.CharField(required=False, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Customer full name'}))
     customer_phone = forms.CharField(required=False, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Phone number'}))
@@ -1288,7 +1306,7 @@ class InvoiceForm(forms.ModelForm):
 class InvoiceLineItemForm(forms.ModelForm):
     class Meta:
         model = InvoiceLineItem
-        fields = ['description', 'item_type', 'inventory_item', 'quantity', 'unit', 'unit_price']
+        fields = ['description', 'item_type', 'inventory_item', 'quantity', 'unit', 'unit_price', 'tax_rate']
         widgets = {
             'description': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Item description'}),
             'item_type': forms.Select(attrs={'class': 'form-select'}),
@@ -1296,6 +1314,7 @@ class InvoiceLineItemForm(forms.ModelForm):
             'quantity': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': '0.01'}),
             'unit': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g., PCS, UNT, HR'}),
             'unit_price': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': '0'}),
+            'tax_rate': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': '0', 'max': '100', 'placeholder': 'VAT %'}),
         }
 
 
