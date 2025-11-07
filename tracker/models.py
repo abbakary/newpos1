@@ -3,6 +3,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from django.db.models import Q
 from datetime import timedelta
+from decimal import Decimal
 import uuid
 
 
