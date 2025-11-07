@@ -8,18 +8,34 @@
 <div class="container-fluid">
   <div class="page-title">
     <div class="row">
-      <div class="col-6"><h4>Orders</h4></div>
       <div class="col-6">
-        <ol class="breadcrumb">
-          <li class="breadcrumb-item"><a href="{% url 'tracker:dashboard' %}"><i class="fa fa-home"></i></a></li>
-          <li class="breadcrumb-item active">Orders</li>
-        </ol>
+        <h4>Orders</h4>
+        <!-- Tab Toggle for Regular vs Started Orders -->
+        <div class="btn-group mt-2" role="tablist">
+          <button class="btn btn-outline-primary btn-sm {% if order_view_mode == 'regular' %}active{% endif %}" type="button" onclick="switchOrderView('regular')">
+            <i class="fa fa-list me-1"></i>Regular Orders
+          </button>
+          <button class="btn btn-outline-warning btn-sm {% if order_view_mode == 'started' %}active{% endif %}" type="button" onclick="switchOrderView('started')">
+            <i class="fa fa-play-circle me-1"></i>Started Orders
+          </button>
+        </div>
+      </div>
+      <div class="col-6">
+        <div class="d-flex justify-content-between align-items-start">
+          <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'tracker:dashboard' %}"><i class="fa fa-home"></i></a></li>
+            <li class="breadcrumb-item active">Orders</li>
+          </ol>
+          <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#startOrderModal" title="Start a new order">
+            <i class="fa fa-plus me-1"></i> Start New Order
+          </button>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- Enhanced KPI Cards Section -->
-  <div class="row g-3 mb-4">
+  <!-- Enhanced KPI Cards Section - Regular Orders -->
+  <div id="regularOrdersKPIs" class="row g-3 mb-4" style="{% if order_view_mode == 'started' %}display: none;{% endif %}">
     <div class="col-xl-3 col-md-6">
       <div class="card kpi-card bg-primary text-white">
         <div class="card-body">
@@ -38,7 +54,7 @@
         </div>
       </div>
     </div>
-    
+
     <div class="col-xl-3 col-md-6">
       <div class="card kpi-card bg-warning text-dark">
         <div class="card-body">
@@ -57,7 +73,7 @@
         </div>
       </div>
     </div>
-    
+
     <div class="col-xl-3 col-md-6">
       <div class="card kpi-card bg-success text-white">
         <div class="card-body">
@@ -76,7 +92,7 @@
         </div>
       </div>
     </div>
-    
+
     <div class="col-xl-3 col-md-6">
       <div class="card kpi-card bg-danger text-white">
         <div class="card-body">
@@ -97,8 +113,87 @@
     </div>
   </div>
 
-  <!-- Search & Filters Section -->
-  <div class="row g-3 mb-3">
+  <!-- Enhanced KPI Cards Section - Started Orders -->
+  <div id="startedOrdersKPIs" class="row g-3 mb-4" style="{% if order_view_mode != 'started' %}display: none;{% endif %}">
+    <div class="col-xl-3 col-md-6">
+      <div class="card kpi-card bg-info text-white">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <h6 class="card-title mb-1">Total Started</h6>
+              <h3 class="mb-0 fw-bold">{{ started_total|default:"0" }}</h3>
+            </div>
+            <div class="kpi-icon">
+              <i class="fa fa-play-circle fa-2x opacity-50"></i>
+            </div>
+          </div>
+          <div class="mt-2">
+            <small class="opacity-75">Orders in progress</small>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6">
+      <div class="card kpi-card bg-warning text-dark">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <h6 class="card-title mb-1">Pending</h6>
+              <h3 class="mb-0 fw-bold">{{ started_pending|default:"0" }}</h3>
+            </div>
+            <div class="kpi-icon">
+              <i class="fa fa-hourglass fa-2x opacity-50"></i>
+            </div>
+          </div>
+          <div class="mt-2">
+            <small class="opacity-75">Awaiting completion</small>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6">
+      <div class="card kpi-card bg-success text-white">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <h6 class="card-title mb-1">Completed</h6>
+              <h3 class="mb-0 fw-bold">{{ started_completed|default:"0" }}</h3>
+            </div>
+            <div class="kpi-icon">
+              <i class="fa fa-check-circle fa-2x opacity-50"></i>
+            </div>
+          </div>
+          <div class="mt-2">
+            <small class="opacity-75">Finished orders</small>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6">
+      <div class="card kpi-card bg-primary text-white">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <h6 class="card-title mb-1">Documents Uploaded</h6>
+              <h3 class="mb-0 fw-bold">{{ documents_uploaded|default:"0" }}</h3>
+            </div>
+            <div class="kpi-icon">
+              <i class="fa fa-file-upload fa-2x opacity-50"></i>
+            </div>
+          </div>
+          <div class="mt-2">
+            <small class="opacity-75">Invoices extracted</small>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Search & Filters Section - Regular Orders -->
+  <div id="regularOrdersFilters" class="row g-3 mb-3" style="{% if order_view_mode == 'started' %}display: none;{% endif %}">
     <div class="col-12">
       <div class="card shadow-sm">
         <div class="card-header bg-light">
@@ -106,6 +201,7 @@
         </div>
         <div class="card-body">
           <form method="get">
+            <input type="hidden" name="view" value="regular">
             <div class="row g-3 align-items-end">
               <div class="col-xl-2 col-lg-4 col-md-6">
                 <label class="form-label fw-medium">Status</label>
@@ -179,13 +275,62 @@
     </div>
   </div>
 
-  <!-- Orders Table -->
-  <div class="card shadow-sm">
+  <!-- Search & Filters Section - Started Orders -->
+  <div id="startedOrdersFilters" class="row g-3 mb-3" style="{% if order_view_mode != 'started' %}display: none;{% endif %}">
+    <div class="col-12">
+      <div class="card shadow-sm">
+        <div class="card-header bg-light">
+          <h6 class="mb-0"><i class="fa fa-filter me-2"></i>Search & Filters</h6>
+        </div>
+        <div class="card-body">
+          <form method="get">
+            <input type="hidden" name="view" value="started">
+            <div class="row g-3 align-items-end">
+              <div class="col-xl-3 col-lg-4 col-md-6">
+                <label class="form-label fw-medium">Search by Plate Number</label>
+                <input type="text" name="plate_search" class="form-control" placeholder="Enter plate number" value="{{ plate_search|default:'' }}">
+              </div>
+              <div class="col-xl-2 col-lg-4 col-md-6">
+                <label class="form-label fw-medium">Status</label>
+                <select name="status" class="form-select">
+                  <option value="all" {% if started_status == 'all' %}selected{% endif %}>All</option>
+                  <option value="created" {% if started_status == 'created' %}selected{% endif %}>Created</option>
+                  <option value="in_progress" {% if started_status == 'in_progress' %}selected{% endif %}>In Progress</option>
+                  <option value="completed" {% if started_status == 'completed' %}selected{% endif %}>Completed</option>
+                </select>
+              </div>
+              <div class="col-xl-2 col-lg-4 col-md-6">
+                <label class="form-label fw-medium">Sort By</label>
+                <select name="sort_by" class="form-select">
+                  <option value="-started_at" {% if started_sort == '-started_at' %}selected{% endif %}>Newest First</option>
+                  <option value="started_at" {% if started_sort == 'started_at' %}selected{% endif %}>Oldest First</option>
+                  <option value="plate_number" {% if started_sort == 'plate_number' %}selected{% endif %}>Plate</option>
+                  <option value="customer_name" {% if started_sort == 'customer_name' %}selected{% endif %}>Customer</option>
+                </select>
+              </div>
+              <div class="col-xl-2 col-lg-4 col-md-6">
+                <div class="d-flex gap-2 h-100 pt-3">
+                  <button class="btn btn-primary flex-fill" type="submit">
+                    <i class="fa fa-search me-1"></i> Search
+                  </button>
+                  {% if request.GET.plate_search or request.GET.status %}
+                  <a href="{% url 'tracker:orders_list' %}?view=started" class="btn btn-outline-secondary" title="Clear Filters">
+                    <i class="fa fa-times"></i>
+                  </a>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Orders Table - Regular Orders -->
+  <div id="regularOrdersTable" class="card shadow-sm" style="{% if order_view_mode == 'started' %}display: none;{% endif %}">
     <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center">
       <h5 class="card-title mb-0"><i class="fa fa-list me-2"></i>Orders List</h5>
-      <a href="{% url 'tracker:order_start' %}" class="btn btn-primary btn-sm">
-        <i class="fa fa-plus me-1"></i> New Order
-      </a>
     </div>
     <div class="card-body p-0">
       <div class="table-responsive">
@@ -395,7 +540,106 @@
       </div>
     </div>
   </div>
+
+  <!-- Orders Table - Started Orders -->
+  <div id="startedOrdersTable" class="card shadow-sm" style="{% if order_view_mode != 'started' %}display: none;{% endif %}">
+    <div class="card-header bg-white border-bottom">
+      <h5 class="card-title mb-0"><i class="fa fa-play-circle me-2"></i>Started Orders</h5>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead class="table-light">
+            <tr>
+              <th class="fw-semibold">Order #</th>
+              <th class="fw-semibold">Plate Number</th>
+              <th class="fw-semibold">Customer</th>
+              <th class="fw-semibold">Phone</th>
+              <th class="fw-semibold">Status</th>
+              <th class="fw-semibold">Documents</th>
+              <th class="fw-semibold text-end" style="width: 120px;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for o in started_orders %}
+            <tr>
+              <td>
+                <a href="{% url 'tracker:started_order_detail' order_id=o.id %}" class="text-decoration-none fw-medium">
+                  {{ o.order_number }}
+                </a>
+              </td>
+              <td class="fw-medium">{{ o.vehicle.plate_number|default:"—" }}</td>
+              <td>
+                <a href="{% url 'tracker:customer_detail' pk=o.customer.id %}" class="text-decoration-none">
+                  {{ o.customer.full_name }}
+                </a>
+              </td>
+              <td>{{ o.customer.phone }}</td>
+              <td>
+                {% if o.status == 'created' %}
+                  <span class="badge bg-secondary rounded-pill"><i class="fa fa-play me-1"></i>Created</span>
+                {% elif o.status == 'in_progress' %}
+                  <span class="badge bg-warning text-dark rounded-pill"><i class="fa fa-clock me-1"></i>In Progress</span>
+                {% elif o.status == 'completed' %}
+                  <span class="badge bg-success rounded-pill"><i class="fa fa-check me-1"></i>Completed</span>
+                {% else %}
+                  <span class="badge bg-light text-dark rounded-pill">{{ o.status }}</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if o.document_scans.count > 0 %}
+                  <span class="badge bg-success rounded-pill">{{ o.document_scans.count }} <i class="fa fa-check ms-1"></i></span>
+                {% else %}
+                  <span class="badge bg-light text-muted">None</span>
+                {% endif %}
+              </td>
+              <td class="text-end">
+                <div class="dropdown actions-dropdown">
+                  <button class="btn btn-action" type="button" data-bs-toggle="dropdown">
+                    <i class="fa fa-ellipsis-v"></i>
+                  </button>
+                  <ul class="dropdown-menu dropdown-menu-end shadow">
+                    <li>
+                      <a class="dropdown-item" href="{% url 'tracker:started_order_detail' order_id=o.id %}">
+                        <i class="fa fa-eye me-2 text-primary"></i>View Details
+                      </a>
+                    </li>
+                    <li>
+                      <a class="dropdown-item" href="{% url 'tracker:started_order_detail' order_id=o.id %}?tab=documents">
+                        <i class="fa fa-file-upload me-2 text-info"></i>Upload Invoice
+                      </a>
+                    </li>
+                    <li><hr class="dropdown-divider my-1"></li>
+                    <li>
+                      <form method="post" action="{% url 'tracker:complete_order' pk=o.id %}" onsubmit="return confirm('Mark as completed?');">
+                        {% csrf_token %}
+                        <button type="submit" class="dropdown-item text-success">
+                          <i class="fa fa-check me-2"></i>Complete Order
+                        </button>
+                      </form>
+                    </li>
+                  </ul>
+                </div>
+              </td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="7" class="text-center text-muted py-4">
+                <i class="fa fa-inbox fa-2x mb-2 text-muted d-block"></i>
+                No started orders found
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 </div>
+
+<!-- Include Start Order Modal -->
+{% include 'tracker/partials/start_order_modal.html' %}
+
 {% endblock %}
 
 {% block extra_js %}
