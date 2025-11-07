@@ -109,32 +109,32 @@
     </div>
 
     <!-- Invoice Upload Section -->
-    <div id="invoice-upload-section" class="card mb-3" style="display: none;">
+    <div id="invoice-upload-section" class="card mb-3 d-none">
       <div class="card-header bg-light">
         <h6 class="mb-0">Upload Invoice File</h6>
       </div>
       <div class="card-body">
-        <div class="upload-area" id="invoiceUploadArea" style="border: 2px dashed #0d6efd; border-radius: 8px; padding: 40px; text-align: center; cursor: pointer; background-color: #f8f9ff; transition: all 0.3s ease;">
-          <i class="fa fa-cloud-upload" style="font-size: 48px; color: #0d6efd; margin-bottom: 15px; display: block;"></i>
-          <h5 style="color: #0d6efd; margin-bottom: 10px;">Drop Invoice Here or Click to Upload</h5>
+        <div class="invoice-upload-area" id="invoiceUploadArea">
+          <i class="fa fa-cloud-upload invoice-upload-icon"></i>
+          <h5 class="invoice-upload-title">Drop Invoice Here or Click to Upload</h5>
           <p class="text-muted mb-3">Supports: PDF, PNG, JPG, JPEG, BMP, GIF, TIFF (Max 10MB)</p>
-          <input type="file" id="invoiceFileInput" accept=".pdf,.png,.jpg,.jpeg,.bmp,.gif,.tiff" style="display: none;">
-          <button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById('invoiceFileInput').click();">
+          <input type="file" id="invoiceFileInput" accept=".pdf,.png,.jpg,.jpeg,.bmp,.gif,.tiff" class="d-none">
+          <button type="button" class="btn btn-primary btn-sm" id="selectInvoiceFileBtn">
             <i class="fa fa-folder-open me-2"></i>Select File
           </button>
         </div>
 
-        <div id="uploadProgress" style="display: none; margin-top: 20px;">
+        <div id="uploadProgress" class="invoice-upload-progress d-none">
           <div class="progress">
             <div id="uploadProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
           </div>
           <p class="text-center mt-2 text-muted"><i class="fa fa-spinner fa-spin me-2"></i>Processing invoice...</p>
         </div>
 
-        <div id="uploadError" class="alert alert-danger mt-3" style="display: none;"></div>
-        <div id="uploadSuccess" class="alert alert-success mt-3" style="display: none;"></div>
+        <div id="uploadError" class="alert alert-danger mt-3 d-none"></div>
+        <div id="uploadSuccess" class="alert alert-success mt-3 d-none"></div>
 
-        <div id="extractedDataPreview" class="mt-4" style="display: none;">
+        <div id="extractedDataPreview" class="mt-4 d-none">
           <h6 class="mb-3">Extracted Data Preview</h6>
           <div class="alert alert-info mb-3">
             <small><i class="fa fa-info-circle me-2"></i>Review the extracted data below. You can edit any field before saving.</small>
