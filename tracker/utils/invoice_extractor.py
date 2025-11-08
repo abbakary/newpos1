@@ -53,12 +53,30 @@ def preprocess_image_pil(img_pil):
 
 
 def ocr_image(img_pil):
+    """Extract text from image using pytesseract OCR.
+
+    Args:
+        img_pil: PIL Image object
+
+    Returns:
+        Extracted text string
+
+    Raises:
+        RuntimeError: If pytesseract is not available
+    """
     if pytesseract is None:
-        raise RuntimeError('pytesseract is not available')
-    # Simple config: treat as single column text but allow some detection
-    config = '--psm 6'
-    text = pytesseract.image_to_string(img_pil, config=config)
-    return text
+        raise RuntimeError('pytesseract is not available. Please install: pip install pytesseract')
+    if cv2 is None:
+        raise RuntimeError('OpenCV is not available. Please install: pip install opencv-python')
+
+    try:
+        # Simple config: treat as single column text but allow some detection
+        config = '--psm 6'
+        text = pytesseract.image_to_string(img_pil, config=config)
+        return text
+    except Exception as e:
+        logger.error(f"OCR failed: {e}")
+        raise RuntimeError(f'OCR extraction failed: {str(e)}')
 
 
 def extract_header_fields(text):
