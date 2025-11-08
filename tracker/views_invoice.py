@@ -220,8 +220,7 @@ def api_upload_extract_invoice(request):
             else:
                 # For real customers, use OrderService
                 try:
-                    from .services import OrderService as OrderServiceClass
-                    order = OrderServiceClass.create_order(
+                    order = OrderService.create_order(
                         customer=customer_obj,
                         order_type='service',
                         branch=user_branch,
