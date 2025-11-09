@@ -284,17 +284,26 @@ def parse_invoice_data(text: str) -> dict:
             address = customer_name
             customer_name = None
 
-    # Extract phone/tel
+    # Extract phone/tel - improved to handle various formats
     phone = extract_field_value(r'(?:Tel|Telephone|Phone)')
     if phone:
         # Remove "Fax" part if followed by fax number
-        phone = re.sub(r'\s+Fax\s+.*$', '', phone, flags=re.I).strip()
-        # Validate - phone should have some digits
+        phone = re.sub(r'[\s/]+Fax.*$', '', phone, flags=re.I).strip()
+        # Remove trailing non-numeric characters
+        phone = re.sub(r'[\s/]+.*(?:Tel|Fax|Email|Address|Ref)\b.*$', '', phone, flags=re.I).strip()
+        # Validate - phone should have some digits (at least 5 consecutive digits or similar patterns)
         if phone and not re.search(r'\d{5,}', phone):
             phone = None
         # Clean up - remove common non-digit prefixes and ensure we have a phone
         if phone:
             phone = re.sub(r'^(?:Tel|Phone|Telephone)\s*[:=]?\s*', '', phone, flags=re.I).strip()
+            # If phone contains "/" or "-", keep first meaningful number
+            if '/' in phone:
+                parts = phone.split('/')
+                phone = parts[0].strip()
+            # Final validation - must have digits
+            if phone and not re.search(r'\d', phone):
+                phone = None
 
     # Extract email
     email = None
