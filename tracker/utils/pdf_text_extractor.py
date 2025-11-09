@@ -124,23 +124,26 @@ def parse_invoice_data(text: str) -> dict:
         search_text = text_to_search or normalized_text
 
         if multiline:
-            # For multiline fields like address, capture until next label line
-            pattern = rf'{label_pattern}\s*[:=\s]\s*((?:[^\n]+(?:\n(?![A-Za-z]+\s*[:=])[^\n]*)?)*)'
-            m = re.search(pattern, search_text, re.I | re.MULTILINE)
+            # For multiline fields like address
+            # Match label, then capture lines until we hit another label or end
+            pattern = rf'^{label_pattern}\s*[:=]\s*(.+?)(?=^[A-Za-z]+\s*[:=]|$)'
+            m = re.search(pattern, search_text, re.I | re.MULTILINE | re.DOTALL)
             if m:
                 result = m.group(1).strip()
-                # Clean up by removing trailing label lines
-                result = result.split('\n')[0:3]  # Take up to 3 lines
-                result = ' '.join([line.strip() for line in result if line.strip()])
-                return result if result else None
+                # Take only non-empty lines, max 3 lines
+                lines = [l.strip() for l in result.split('\n') if l.strip()]
+                result = ' '.join(lines[:3]) if lines else None
+                # Clean trailing single colons or labels
+                result = re.sub(r'\s+(:|\w+\s*[:=].*)$', '', result, flags=re.I) if result else None
+                return result
         else:
-            # Single line field
-            pattern = rf'{label_pattern}\s*[:=\s]\s*([^\n]+?)(?:\n|$)'
+            # Single line field - capture until newline, but watch for labels
+            pattern = rf'^{label_pattern}\s*[:=]\s*(.+?)(?=\s{2,}(?:Tel|Fax|Del\.|Ref|Date|Kind|Attended|Type|Payment|Delivery|Remarks|NOTE|PI\s|Cust|Qty|Rate|Value)|\n(?=[A-Z])|$)'
             m = re.search(pattern, search_text, re.I | re.MULTILINE)
             if m:
                 result = m.group(1).strip()
-                # Clean up trailing noise like labels
-                result = re.sub(r'\s+(Tel|Fax|Del\.|Ref|Date|PI|Cust|Kind|Attended|Type|Payment|Delivery|Remarks|NOTE)\s*.*$', '', result, flags=re.I)
+                # Clean up any inline labels
+                result = re.sub(r'\s+(Tel|Fax|Del\.|Ref|Date|PI|Cust|Kind|Attended|Type|Payment|Delivery|Remarks|NOTE).*$', '', result, flags=re.I)
                 result = ' '.join(result.split())  # Normalize whitespace
                 return result if result else None
         return None
