@@ -27,47 +27,75 @@ logger = logging.getLogger(__name__)
 
 def extract_text_from_pdf(file_bytes) -> str:
     """Extract text from PDF file using PyMuPDF or PyPDF2.
-    
+
     Args:
         file_bytes: Raw bytes of PDF file
-        
+
     Returns:
         Extracted text string
-        
+
     Raises:
-        RuntimeError: If no PDF extraction library is available
+        RuntimeError: If no PDF extraction library is available or text extraction fails
     """
     text = ""
-    
+    fitz_error = None
+    pdf2_error = None
+
     # Try PyMuPDF first (fitz) - best for text extraction
     if fitz is not None:
         try:
             pdf_doc = fitz.open(stream=file_bytes, filetype="pdf")
             for page in pdf_doc:
-                text += page.get_text()
+                page_text = page.get_text()
+                if page_text:
+                    text += page_text
             pdf_doc.close()
-            logger.info(f"Extracted {len(text)} characters from PDF using PyMuPDF")
-            return text
+
+            if text and text.strip():
+                logger.info(f"Successfully extracted {len(text)} characters from PDF using PyMuPDF")
+                return text
+            else:
+                logger.warning("PyMuPDF extracted empty text from PDF")
+                fitz_error = "No text found in PDF (PyMuPDF)"
         except Exception as e:
             logger.warning(f"PyMuPDF extraction failed: {e}")
+            fitz_error = str(e)
             text = ""
-    
+
     # Fallback to PyPDF2
+    text = ""
     if PyPDF2 is not None:
         try:
             pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
-            for page in pdf_reader.pages:
-                text += page.extract_text()
-            logger.info(f"Extracted {len(text)} characters from PDF using PyPDF2")
-            return text
+            if len(pdf_reader.pages) == 0:
+                pdf2_error = "PDF has no pages"
+            else:
+                for page in pdf_reader.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text
+
+                if text and text.strip():
+                    logger.info(f"Successfully extracted {len(text)} characters from PDF using PyPDF2")
+                    return text
+                else:
+                    logger.warning("PyPDF2 extracted empty text from PDF")
+                    pdf2_error = "No text found in PDF (PyPDF2)"
         except Exception as e:
             logger.warning(f"PyPDF2 extraction failed: {e}")
-            text = ""
-    
-    if not text:
-        raise RuntimeError('No PDF text extraction library available. Install PyMuPDF or PyPDF2.')
-    
-    return text
+            pdf2_error = str(e)
+
+    # If we get here, extraction failed with both libraries
+    if not fitz and not PyPDF2:
+        error_msg = 'No PDF extraction library available. Install PyMuPDF or PyPDF2.'
+    elif fitz_error and pdf2_error:
+        error_msg = f'PDF extraction failed - PyMuPDF: {fitz_error}. PyPDF2: {pdf2_error}'
+    elif fitz_error:
+        error_msg = fitz_error
+    else:
+        error_msg = pdf2_error or 'Unknown PDF extraction error'
+
+    raise RuntimeError(error_msg)
 
 
 def extract_text_from_image(file_bytes) -> str:
@@ -147,9 +175,7 @@ def parse_invoice_data(text: str) -> dict:
         """
         search_text = text_to_search or normalized_text
         patterns = label_patterns if isinstance(label_patterns, list) else [label_patterns]
-        stop_patterns = stop_at_patterns or [
-            r'Tel|Fax|Del|Ref|Date|Kind|Attended|Type|Payment|Delivery|Reference|PI|Cust|Qty|Rate|Value|Address|Customer|Code'
-        ]
+        stop_patterns = stop_at_patterns or r'Tel|Fax|Del|Ref|Date|Kind|Attended|Type|Payment|Delivery|Reference|PI|Cust|Qty|Rate|Value|Address|Customer|Code'
 
         for pattern in patterns:
             # Strategy 1: Look for "Label: Value" or "Label = Value" on same line
@@ -255,12 +281,21 @@ def parse_invoice_data(text: str) -> dict:
     # Extract customer name - more careful pattern matching
     customer_name = None
 
-    # First try the exact "Customer Name" pattern
+    # First try the exact "Customer Name" pattern with or without colon
+    # Pattern 1: "Customer Name: VALUE" or "Customer NameVALUE"
     m = re.search(r'Customer\s*Name\s*[:=]?\s*([^\n:{{]+?)(?=\n(?:Address|Tel|Attended|Kind|Reference|PI|Code)|$)', normalized_text, re.I | re.MULTILINE | re.DOTALL)
     if m:
         customer_name = m.group(1).strip()
         # Clean up any trailing field indicators
         customer_name = re.sub(r'\s+(?:Address|Tel|Phone|Fax|Email|Attended|Kind|Ref)\b.*$', '', customer_name, flags=re.I).strip()
+
+    # Pattern 2: Handle case where Customer Name appears on same line as value (no separator)
+    if not customer_name:
+        m = re.search(r'Customer\s*Name\s+([A-Z][^\n]+?)(?=\n|$)', normalized_text, re.I | re.MULTILINE)
+        if m:
+            customer_name = m.group(1).strip()
+            # Clean up trailing labels
+            customer_name = re.sub(r'\s+(?:Address|Tel|Phone|Fax|Code|PI|Date)\b.*$', '', customer_name, flags=re.I).strip()
 
     # If still not found, try alternative patterns
     if not customer_name:
@@ -281,17 +316,30 @@ def parse_invoice_data(text: str) -> dict:
 
     # Extract address - improved to handle multi-line addresses
     address = None
-    address_pattern = re.compile(r'Address\s*[:=]?\s*(.+?)(?=\n(?:Tel|Attended|Kind|Reference|PI|Code|Fax|Del\.|Remarks|NOTE|Payment|Delivery)\b|$)', re.I | re.MULTILINE | re.DOTALL)
+
+    # Pattern 1: Standard "Address:" format
+    address_pattern = re.compile(r'Address\s*[:=]?\s*(.+?)(?=\n(?:Tel|Attended|Kind|Reference|PI|Code|Fax|Del\.|Remarks|NOTE|Payment|Delivery|Email)\b|$)', re.I | re.MULTILINE | re.DOTALL)
     address_match = address_pattern.search(normalized_text)
 
     if address_match:
         address_text = address_match.group(1).strip()
         # Clean up the address text - remove trailing labels/keywords
-        address_text = re.sub(r'\s+(?:Tel|Phone|Fax|Attended|Kind|Reference|Ref\.|Date|PI|Code|Type|Payment|Delivery|Remarks|NOTE|Qty|Rate|Value)\b.*', '', address_text, flags=re.I).strip()
+        address_text = re.sub(r'\s+(?:Tel|Phone|Fax|Attended|Kind|Reference|Ref\.|Date|PI|Code|Type|Payment|Delivery|Remarks|NOTE|Qty|Rate|Value|Email|Customer)\b.*', '', address_text, flags=re.I).strip()
         # Keep newlines in address for readability (they're often multi-line)
         address_text = ' '.join(line.strip() for line in address_text.split('\n') if line.strip())
         if address_text and len(address_text) > 2:
             address = address_text
+
+    # Pattern 2: If not found, look for multi-line address after "Address" keyword
+    if not address:
+        m = re.search(r'Address\s+([A-Z][^\n]*(?:\n[A-Z][^\n]*){0,3})(?=\n(?:Tel|Attended|Kind|Phone|Email|Payment)|$)', normalized_text, re.I | re.MULTILINE)
+        if m:
+            address_text = m.group(1).strip()
+            # Clean up
+            address_text = re.sub(r'\s+(?:Tel|Phone|Fax|Email|Code|PI|Date)\b.*$', '', address_text, flags=re.I).strip()
+            address_text = ' '.join(line.strip() for line in address_text.split('\n') if line.strip())
+            if address_text and len(address_text) > 2:
+                address = address_text
 
     # Smart fix: If customer_name is empty but address looks like it contains the name
     # Try to split the address and extract name from first line
@@ -540,19 +588,29 @@ def parse_invoice_data(text: str) -> dict:
             kind_attention = None
 
     # Extract line items with improved detection for various formats
-    # The algorithm:
-    # 1. Find the table header row (contains item-related keywords)
-    # 2. Parse all lines after the header until we hit a totals section
-    # 3. For each item line, extract: description, code, qty, unit, rate, value
+    # The algorithm handles both:
+    # 1. Well-formatted PDFs: table with columns
+    # 2. Scrambled PDFs: descriptions, codes, and amounts scattered
+    #
+    # Strategy:
+    # - Find item section header
+    # - Group consecutive description lines
+    # - Match codes with descriptions
+    # - Extract quantities and amounts
     items = []
     item_section_started = False
     item_header_idx = -1
 
+    # Collect all lines to process
+    line_data = []
     for idx, line in enumerate(lines):
         line_stripped = line.strip()
         if not line_stripped:
             continue
+        line_data.append((idx, line_stripped))
 
+    # Find header and extract section
+    for list_idx, (idx, line_stripped) in enumerate(line_data):
         # Detect item section header - line with multiple item-related keywords
         keyword_count = sum([
             1 if re.search(r'\b(?:Sr|S\.N|Serial|No\.?)\b', line_stripped, re.I) else 0,
@@ -565,16 +623,16 @@ def parse_invoice_data(text: str) -> dict:
 
         if keyword_count >= 3:
             item_section_started = True
-            item_header_idx = idx
+            item_header_idx = list_idx
             continue
 
         # Stop at totals/summary section
-        if item_section_started and idx > item_header_idx + 1:
+        if item_section_started and list_idx > item_header_idx + 1:
             if re.search(r'(?:Net\s*Value|Gross\s*Value|Grand\s*Total|Total\s*:|Payment|Delivery|Remarks|NOTE)', line_stripped, re.I):
                 break
 
         # Parse item lines (after header starts)
-        if item_section_started and idx > item_header_idx:
+        if item_section_started and list_idx > item_header_idx:
             # Extract all numbers and their positions
             numbers = re.findall(r'[0-9\,]+\.?\d*', line_stripped)
 
@@ -669,7 +727,7 @@ def parse_invoice_data(text: str) -> dict:
                         # Find qty: small integer (1-1000)
                         qty_candidate = None
                         qty_index = None
-                        for idx, fn in enumerate(float_numbers):
+                        for num_idx, fn in enumerate(float_numbers):
                             if 0.5 < fn < 1000 and (fn == int(fn) or abs(fn - round(fn)) < 0.1):
                                 if fn <= max_num / 10:  # Qty should be much smaller than value
                                     qty_candidate = int(round(fn))
@@ -701,6 +759,28 @@ def parse_invoice_data(text: str) -> dict:
                 except Exception as e:
                     logger.warning(f"Error parsing item line: {line_stripped}, {e}")
 
+            # Process line with only text (description line in scrambled format)
+            elif text_parts and not numbers:
+                # This is likely a description line in a scrambled PDF
+                # Check if we should add it as a new item or continue the previous one
+                full_text = ' '.join(text_parts)
+
+                # If it looks like a product/service description, add as new item
+                # Check for unit indicators which signal continuation
+                unit_match = re.search(r'\b(NOS|PCS|KG|HR|LTR|PIECES?|UNITS?|BOX|CASE|SETS?|PC|KIT|UNT)\b', full_text, re.I)
+
+                if full_text and len(full_text) > 3:
+                    # New item with just description
+                    item = {
+                        'description': full_text[:255],
+                        'qty': 1,
+                        'unit': unit_match.group(1).upper() if unit_match else None,
+                        'value': None,
+                        'rate': None,
+                        'code': None,
+                    }
+                    items.append(item)
+
             # Process line with only numbers (continuation of item data)
             elif numbers and not text_parts:
                 # Skip standalone number lines (likely part of header or footer)
@@ -709,11 +789,55 @@ def parse_invoice_data(text: str) -> dict:
 
                 try:
                     float_numbers = [float(n.replace(',', '')) for n in numbers]
+
+                    # First number might be an item code (if it's a large number)
+                    # Try to identify and extract code
+                    code = None
+                    remaining_numbers = float_numbers
+
+                    if len(float_numbers) >= 3:
+                        # Check if first number looks like an item code (3-6 digits)
+                        first = float_numbers[0]
+                        if 100 <= first <= 999999 and first == int(first):
+                            if (100 <= first <= 999) or (3000 <= first <= 50000) or (10000 <= first <= 999999):
+                                code = str(int(first))
+                                remaining_numbers = float_numbers[1:]
+
                     # Treat largest number as value
-                    value = max(float_numbers)
-                    if value > 0 and items:
-                        # Only update if item doesn't have a value yet
-                        if not items[-1].get('value'):
+                    value = max(remaining_numbers) if remaining_numbers else 0
+                    qty = None
+                    rate = None
+
+                    # If we have multiple remaining numbers, try to identify qty and rate
+                    if len(remaining_numbers) == 2:
+                        # Could be qty + value, or rate + value
+                        if remaining_numbers[0] < 100 and remaining_numbers[0] == int(remaining_numbers[0]):
+                            qty = int(remaining_numbers[0])
+                            value = remaining_numbers[1]
+                        elif remaining_numbers[1] < 100 and remaining_numbers[1] == int(remaining_numbers[1]):
+                            qty = int(remaining_numbers[1])
+                            value = remaining_numbers[0]
+                    elif len(remaining_numbers) == 3:
+                        # Could be qty + rate + value
+                        max_val = max(remaining_numbers)
+                        min_val = min(remaining_numbers)
+                        mid_val = sum(remaining_numbers) - max_val - min_val
+
+                        if min_val < 100 and min_val == int(min_val):
+                            qty = int(min_val)
+                            if items and mid_val > 0:
+                                rate = to_decimal(str(mid_val))
+                        value = max_val
+
+                    # Apply to last item if it exists
+                    if items:
+                        if code and not items[-1].get('code'):
+                            items[-1]['code'] = code
+                        if qty and not items[-1].get('qty'):
+                            items[-1]['qty'] = qty
+                        if rate and not items[-1].get('rate'):
+                            items[-1]['rate'] = rate
+                        if value > 0 and not items[-1].get('value'):
                             items[-1]['value'] = to_decimal(str(value))
                 except Exception:
                     pass
@@ -741,15 +865,15 @@ def parse_invoice_data(text: str) -> dict:
 
 def extract_from_bytes(file_bytes, filename: str = '') -> dict:
     """Main entry point: extract text from file and parse invoice data.
-    
+
     Supports:
     - PDF files: Uses PyMuPDF/PyPDF2 for text extraction
     - Image files: Requires manual entry (OCR not available)
-    
+
     Args:
         file_bytes: Raw bytes of uploaded file
         filename: Original filename (to detect file type)
-        
+
     Returns:
         dict with keys: success, header, items, raw_text, ocr_available, error, message
     """
@@ -757,103 +881,123 @@ def extract_from_bytes(file_bytes, filename: str = '') -> dict:
         return {
             'success': False,
             'error': 'empty_file',
-            'message': 'File is empty',
+            'message': 'File is empty. Please upload a valid PDF file.',
             'ocr_available': False,
             'header': {},
             'items': [],
             'raw_text': ''
         }
-    
+
     # Detect file type
     is_pdf = filename.lower().endswith('.pdf') or file_bytes[:4] == b'%PDF'
     is_image = filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.tiff', '.bmp'))
-    
+
     text = ""
-    extraction_error = None
-    
-    # Try to extract text
-    if is_pdf:
-        try:
-            text = extract_text_from_pdf(file_bytes)
-        except Exception as e:
-            logger.error(f"PDF extraction failed: {e}")
-            extraction_error = str(e)
-            return {
-                'success': False,
-                'error': 'pdf_extraction_failed',
-                'message': f'Failed to extract text from PDF: {str(e)}. Please enter invoice details manually.',
-                'ocr_available': False,
-                'header': {},
-                'items': [],
-                'raw_text': ''
-            }
-    elif is_image:
+
+    # Validate file format
+    if is_image:
         return {
             'success': False,
             'error': 'image_file_not_supported',
-            'message': 'Image files require manual entry (OCR not available). Please save as PDF or enter details manually.',
+            'message': 'Image files are not supported. Please convert to PDF or enter details manually.',
             'ocr_available': False,
             'header': {},
             'items': [],
             'raw_text': ''
         }
-    else:
+
+    if not is_pdf:
         return {
             'success': False,
             'error': 'unsupported_file_type',
-            'message': 'Please upload a PDF file (images are not supported without OCR).',
+            'message': 'Please upload a PDF file.',
             'ocr_available': False,
             'header': {},
             'items': [],
             'raw_text': ''
         }
-    
-    # Parse extracted text
-    if text:
-        try:
-            parsed = parse_invoice_data(text)
-            # Prepare header with all extracted fields
-            header = {
-                'invoice_no': parsed.get('invoice_no'),
-                'code_no': parsed.get('code_no'),
-                'date': parsed.get('date'),
-                'customer_name': parsed.get('customer_name'),
-                'phone': parsed.get('phone'),
-                'email': parsed.get('email'),
-                'address': parsed.get('address'),
-                'reference': parsed.get('reference'),
-                'subtotal': parsed.get('subtotal'),
-                'tax': parsed.get('tax'),
-                'total': parsed.get('total'),
-                'payment_method': parsed.get('payment_method'),
-                'delivery_terms': parsed.get('delivery_terms'),
-                'remarks': parsed.get('remarks'),
-                'attended_by': parsed.get('attended_by'),
-                'kind_attention': parsed.get('kind_attention'),
-            }
 
-            # Format items with all extracted fields
-            items = []
-            for item in parsed.get('items', []):
-                items.append({
-                    'description': item.get('description', ''),
-                    'qty': item.get('qty', 1),
-                    'unit': item.get('unit'),
-                    'code': item.get('code'),
-                    'value': float(item.get('value', 0)) if item.get('value') else 0,
-                    'rate': float(item.get('rate', 0)) if item.get('rate') else None,
-                })
+    # Extract text from PDF
+    try:
+        text = extract_text_from_pdf(file_bytes)
+    except Exception as e:
+        logger.error(f"PDF text extraction failed: {e}")
+        return {
+            'success': False,
+            'error': 'pdf_extraction_failed',
+            'message': f'Could not extract text from PDF. Please enter invoice details manually.',
+            'ocr_available': False,
+            'header': {},
+            'items': [],
+            'raw_text': ''
+        }
 
+    # Validate that we got text
+    if not text or not text.strip():
+        logger.warning("PDF text extraction returned empty text")
+        return {
+            'success': False,
+            'error': 'no_text_extracted',
+            'message': 'No readable text found in PDF (possibly a scanned image). Please enter invoice details manually.',
+            'ocr_available': False,
+            'header': {},
+            'items': [],
+            'raw_text': ''
+        }
+
+    # Parse extracted text to structured invoice data
+    try:
+        parsed = parse_invoice_data(text)
+
+        # Prepare header with all extracted fields
+        header = {
+            'invoice_no': parsed.get('invoice_no'),
+            'code_no': parsed.get('code_no'),
+            'date': parsed.get('date'),
+            'customer_name': parsed.get('customer_name'),
+            'phone': parsed.get('phone'),
+            'email': parsed.get('email'),
+            'address': parsed.get('address'),
+            'reference': parsed.get('reference'),
+            'subtotal': parsed.get('subtotal'),
+            'tax': parsed.get('tax'),
+            'total': parsed.get('total'),
+            'payment_method': parsed.get('payment_method'),
+            'delivery_terms': parsed.get('delivery_terms'),
+            'remarks': parsed.get('remarks'),
+            'attended_by': parsed.get('attended_by'),
+            'kind_attention': parsed.get('kind_attention'),
+        }
+
+        # Format items with all extracted fields
+        items = []
+        for item in parsed.get('items', []):
+            items.append({
+                'description': item.get('description', ''),
+                'qty': item.get('qty', 1),
+                'unit': item.get('unit'),
+                'code': item.get('code'),
+                'value': float(item.get('value', 0)) if item.get('value') else 0,
+                'rate': float(item.get('rate', 0)) if item.get('rate') else None,
+            })
+
+        # Check if we extracted any meaningful data
+        has_customer = bool(header.get('customer_name'))
+        has_items = len(items) > 0
+        has_amounts = any([header.get('subtotal'), header.get('tax'), header.get('total')])
+
+        if has_customer or has_items or has_amounts:
+            logger.info(f"Successfully extracted invoice data: customer={has_customer}, items={has_items}, amounts={has_amounts}")
             return {
                 'success': True,
                 'header': header,
                 'items': items,
                 'raw_text': text,
-                'ocr_available': False,  # Using text extraction, not OCR
-                'message': 'Invoice data extracted successfully from PDF'
+                'ocr_available': False,
+                'message': 'Invoice data extracted successfully'
             }
-        except Exception as e:
-            logger.warning(f"Failed to parse invoice data: {e}")
+        else:
+            logger.warning("PDF text extracted but no invoice data found after parsing")
             return {
                 'success': False,
                 'error': 'parsing_failed',
@@ -863,14 +1007,14 @@ def extract_from_bytes(file_bytes, filename: str = '') -> dict:
                 'items': [],
                 'raw_text': text
             }
-    
-    # If no text was extracted
-    return {
-        'success': False,
-        'error': 'no_text_extracted',
-        'message': 'No text found in PDF. Please enter invoice details manually.',
-        'ocr_available': False,
-        'header': {},
-        'items': [],
-        'raw_text': ''
-    }
+    except Exception as e:
+        logger.error(f"Invoice data parsing failed: {e}", exc_info=True)
+        return {
+            'success': False,
+            'error': 'parsing_failed',
+            'message': 'Could not extract structured data from PDF. Please enter invoice details manually.',
+            'ocr_available': False,
+            'header': {},
+            'items': [],
+            'raw_text': text
+        }
