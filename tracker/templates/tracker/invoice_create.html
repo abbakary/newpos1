@@ -690,16 +690,41 @@
                     const d = window.__lastInvoiceExtraction || {};
                     if (!d || !d.header) return;
                     const hdr = d.header;
+                    const f = document.querySelector('form');
+
                     // Map extracted header fields to form inputs
                     const map = {
                       'customer_full_name': hdr.customer_name || '',
                       'customer_phone': hdr.phone || '',
                       'customer_email': hdr.email || '',
                       'customer_address': hdr.address || '',
-                      'reference': hdr.invoice_no || hdr.code_no || ''
+                      'reference': hdr.invoice_no || hdr.code_no || hdr.reference || ''
                     };
-                    const f = document.querySelector('form');
-                    Object.keys(map).forEach(k=>{ const el = f.querySelector('[name="'+k+'"]'); if (el) { el.value = map[k]; el.dispatchEvent(new Event('input', {bubbles: true})); } });
+
+                    Object.keys(map).forEach(k=>{
+                      const el = f.querySelector('[name="'+k+'"]');
+                      if (el) {
+                        el.value = map[k];
+                        el.dispatchEvent(new Event('input', {bubbles: true}));
+                      }
+                    });
+
+                    // Handle invoice_date - convert from extracted date format (dd/mm/yyyy) to form format (YYYY-MM-DD)
+                    if (hdr.date) {
+                      const dateEl = f.querySelector('[name="invoice_date"]');
+                      if (dateEl) {
+                        // Try to parse the date
+                        let formattedDate = hdr.date;
+                        // If date looks like dd/mm/yyyy, convert to yyyy-mm-dd
+                        const dateMatch = hdr.date.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+                        if (dateMatch) {
+                          formattedDate = dateMatch[3] + '-' + String(dateMatch[2]).padStart(2,'0') + '-' + String(dateMatch[1]).padStart(2,'0');
+                        }
+                        dateEl.value = formattedDate;
+                        dateEl.dispatchEvent(new Event('input', {bubbles: true}));
+                      }
+                    }
+
                     // Switch back to manual mode
                     reviewModal && reviewModal.hide();
                     document.getElementById('mode-manual').checked=true;
