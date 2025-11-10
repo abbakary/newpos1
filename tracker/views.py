@@ -2950,12 +2950,14 @@ def customer_detail(request: HttpRequest, pk: int):
     orders = customer.orders.all().order_by('-created_at')
     vehicles = customer.vehicles.all()
     notes = customer.note_entries.all().order_by('-created_at')
+    invoices = customer.invoices.all().order_by('-invoice_date', '-created_at')
 
     return render(request, "tracker/customer_detail.html", {
         'customer': customer,
         'orders': orders,
         'vehicles': vehicles,
         'notes': notes,
+        'invoices': invoices,
     })
 
 
