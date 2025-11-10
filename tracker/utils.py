@@ -1,8 +1,29 @@
 import os
 import base64
 import json
+import re
 import os
 from urllib import request, parse, error
+
+
+def normalize_phone(phone: str) -> str:
+    """
+    Normalize phone number by removing all non-digit characters.
+    Used for consistent phone number comparison in duplicate detection.
+
+    Args:
+        phone: Phone number string (may contain spaces, dashes, parentheses, etc.)
+
+    Returns:
+        String containing only digits from the phone number
+
+    Example:
+        normalize_phone("+255 789 123 456")  -> "255789123456"
+        normalize_phone("0789-123-456")       -> "0789123456"
+    """
+    if not phone:
+        return ""
+    return re.sub(r'\D', '', str(phone))
 
 
 def _post_json(url: str, payload: dict, headers: dict | None = None) -> tuple[bool, str]:
