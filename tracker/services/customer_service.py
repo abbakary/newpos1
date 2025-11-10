@@ -3,7 +3,6 @@ Centralized service for creating and managing customers, vehicles, and orders.
 This ensures consistent deduplication, visit tracking, and code generation across all flows.
 """
 
-import re
 import logging
 from decimal import Decimal
 from datetime import datetime
@@ -14,19 +13,13 @@ from django.utils import timezone
 from django.contrib.auth.models import User
 
 from tracker.models import Customer, Vehicle, Order, InventoryItem, ServiceType, ServiceAddon, Branch
+from tracker.utils import normalize_phone
 
 logger = logging.getLogger(__name__)
 
 
 class CustomerService:
     """Service for managing customer creation with proper deduplication and visit tracking."""
-
-    @staticmethod
-    def normalize_phone(phone: str) -> str:
-        """Normalize phone number by removing all non-digit characters."""
-        if not phone:
-            return ""
-        return re.sub(r'\D', '', str(phone))
 
     @staticmethod
     def find_duplicate_customer(
@@ -40,25 +33,38 @@ class CustomerService:
         """
         Find existing customer matching the given criteria.
         Uses database unique constraint: (branch, full_name, phone, organization_name, tax_number)
+        Normalizes phone numbers for comparison.
         Returns the matching customer if found, None otherwise.
         """
         if not branch or not full_name or not phone:
             return None
 
         try:
-            # Match the database unique constraint exactly
-            query = Customer.objects.filter(
+            # Normalize phone for comparison
+            normalized_phone = normalize_phone(phone)
+
+            # Get all potential matches by name and branch
+            candidates = Customer.objects.filter(
                 branch=branch,
                 full_name__iexact=full_name,
-                phone=phone,
-                organization_name=organization_name or '',
-                tax_number=tax_number or '',
             )
 
-            if customer_type:
-                query = query.filter(customer_type=customer_type)
+            # Check each candidate for phone match (handling normalized numbers)
+            for candidate in candidates:
+                candidate_phone = normalize_phone(candidate.phone or '')
 
-            return query.first()
+                # Match phone (normalized), organization_name, and tax_number
+                org_match = (organization_name or '') == (candidate.organization_name or '')
+                tax_match = (tax_number or '') == (candidate.tax_number or '')
+                phone_match = normalized_phone == candidate_phone
+
+                if phone_match and org_match and tax_match:
+                    # If customer_type is specified, it must also match
+                    if customer_type and candidate.customer_type != customer_type:
+                        continue
+                    return candidate
+
+            return None
         except Exception as e:
             logger.warning(f"Error finding duplicate customer: {e}")
             return None
@@ -81,6 +87,7 @@ class CustomerService:
         """
         Create or get a customer with proper deduplication.
         If customer exists, updates contact information (address, email, whatsapp).
+        Phone numbers are normalized for comparison but stored as-is.
 
         Args:
             branch: User's branch
@@ -103,6 +110,12 @@ class CustomerService:
         """
         full_name = (full_name or "").strip()
         phone = (phone or "").strip()
+        email = (email or "").strip() or None
+        whatsapp = (whatsapp or "").strip() or None
+        address = (address or "").strip() or None
+        notes = (notes or "").strip() or None
+        organization_name = (organization_name or "").strip() or None
+        tax_number = (tax_number or "").strip() or None
 
         if not full_name or not phone:
             raise ValueError("Customer full_name and phone are required")
@@ -120,13 +133,13 @@ class CustomerService:
         if existing:
             # Customer already exists - update contact info if provided
             updated = False
-            if address and address.strip() and (not existing.address or existing.address != address):
+            if address and (not existing.address or existing.address != address):
                 existing.address = address
                 updated = True
-            if email and email.strip() and (not existing.email or existing.email != email):
+            if email and (not existing.email or existing.email != email):
                 existing.email = email
                 updated = True
-            if whatsapp and whatsapp.strip() and (not existing.whatsapp or existing.whatsapp != whatsapp):
+            if whatsapp and (not existing.whatsapp or existing.whatsapp != whatsapp):
                 existing.whatsapp = whatsapp
                 updated = True
 
@@ -145,13 +158,13 @@ class CustomerService:
                     branch=branch,
                     full_name=full_name,
                     phone=phone,
-                    email=email or None,
-                    whatsapp=whatsapp or None,
-                    address=address or None,
-                    notes=notes or None,
+                    email=email,
+                    whatsapp=whatsapp,
+                    address=address,
+                    notes=notes,
                     customer_type=customer_type or "personal",
-                    organization_name=organization_name or None,
-                    tax_number=tax_number or None,
+                    organization_name=organization_name,
+                    tax_number=tax_number,
                     personal_subtype=personal_subtype or None,
                     arrival_time=timezone.now(),
                     current_status='arrived',
@@ -173,13 +186,13 @@ class CustomerService:
             if existing:
                 # Update contact info for the found customer
                 updated = False
-                if address and address.strip() and (not existing.address or existing.address != address):
+                if address and (not existing.address or existing.address != address):
                     existing.address = address
                     updated = True
-                if email and email.strip() and (not existing.email or existing.email != email):
+                if email and (not existing.email or existing.email != email):
                     existing.email = email
                     updated = True
-                if whatsapp and whatsapp.strip() and (not existing.whatsapp or existing.whatsapp != whatsapp):
+                if whatsapp and (not existing.whatsapp or existing.whatsapp != whatsapp):
                     existing.whatsapp = whatsapp
                     updated = True
 

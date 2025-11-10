@@ -885,17 +885,93 @@ def api_recent_invoices(request):
 def invoice_finalize(request, pk):
     """Finalize invoice and change status to issued"""
     invoice = get_object_or_404(Invoice, pk=pk)
-    
+
     if invoice.status == 'draft':
         if invoice.line_items.count() == 0:
             messages.error(request, 'Invoice must have at least one line item.')
             return redirect('tracker:invoice_detail', pk=pk)
-        
+
         invoice.status = 'issued'
         invoice.save()
         messages.success(request, f'Invoice {invoice.invoice_number} finalized.')
-    
+
     return redirect('tracker:invoice_detail', pk=pk)
+
+
+@login_required
+@require_http_methods(["GET"])
+def invoice_document_download(request, pk):
+    """Download uploaded invoice document"""
+    invoice = get_object_or_404(Invoice, pk=pk)
+
+    # Verify user has access to this invoice
+    user_branch = get_user_branch(request.user)
+    if not request.user.is_superuser:
+        if invoice.branch and user_branch and invoice.branch.id != user_branch.id:
+            messages.error(request, "You don't have permission to access this invoice.")
+            return redirect('tracker:invoice_list')
+
+    if not invoice.document:
+        messages.error(request, 'This invoice has no document attached.')
+        return redirect('tracker:invoice_detail', pk=pk)
+
+    try:
+        # Open the file from storage
+        response = HttpResponse(invoice.document.read(), content_type='application/octet-stream')
+
+        # Get the original filename from the document path
+        filename = invoice.document.name.split('/')[-1] if invoice.document.name else f'Invoice_{invoice.invoice_number}.pdf'
+
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+    except Exception as e:
+        logger.error(f"Error downloading invoice document {pk}: {e}")
+        messages.error(request, 'Error downloading document.')
+        return redirect('tracker:invoice_detail', pk=pk)
+
+
+@login_required
+@require_http_methods(["GET"])
+def invoice_document_view(request, pk):
+    """View uploaded invoice document inline (for images and PDFs)"""
+    invoice = get_object_or_404(Invoice, pk=pk)
+
+    # Verify user has access to this invoice
+    user_branch = get_user_branch(request.user)
+    if not request.user.is_superuser:
+        if invoice.branch and user_branch and invoice.branch.id != user_branch.id:
+            messages.error(request, "You don't have permission to access this invoice.")
+            return redirect('tracker:invoice_list')
+
+    if not invoice.document:
+        messages.error(request, 'This invoice has no document attached.')
+        return redirect('tracker:invoice_detail', pk=pk)
+
+    try:
+        # Get MIME type based on file extension
+        filename = invoice.document.name.lower() if invoice.document.name else ''
+
+        if filename.endswith('.pdf'):
+            content_type = 'application/pdf'
+        elif filename.endswith(('.jpg', '.jpeg')):
+            content_type = 'image/jpeg'
+        elif filename.endswith('.png'):
+            content_type = 'image/png'
+        elif filename.endswith('.gif'):
+            content_type = 'image/gif'
+        elif filename.endswith('.webp'):
+            content_type = 'image/webp'
+        else:
+            # Default to PDF for unknown types
+            content_type = 'application/pdf'
+
+        response = HttpResponse(invoice.document.read(), content_type=content_type)
+        response['Content-Disposition'] = 'inline'  # View inline instead of download
+        return response
+    except Exception as e:
+        logger.error(f"Error viewing invoice document {pk}: {e}")
+        messages.error(request, 'Error viewing document.')
+        return redirect('tracker:invoice_detail', pk=pk)
 
 
 @login_required
