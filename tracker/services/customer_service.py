@@ -41,7 +41,7 @@ class CustomerService:
 
         try:
             # Normalize phone for comparison
-            normalized_phone = CustomerService.normalize_phone(phone)
+            normalized_phone = normalize_phone(phone)
 
             # Get all potential matches by name and branch
             candidates = Customer.objects.filter(
@@ -51,7 +51,7 @@ class CustomerService:
 
             # Check each candidate for phone match (handling normalized numbers)
             for candidate in candidates:
-                candidate_phone = CustomerService.normalize_phone(candidate.phone or '')
+                candidate_phone = normalize_phone(candidate.phone or '')
 
                 # Match phone (normalized), organization_name, and tax_number
                 org_match = (organization_name or '') == (candidate.organization_name or '')
