@@ -341,10 +341,11 @@ def parse_invoice_data(text: str) -> dict:
     if m:
         customer_name = m.group(1).strip()
 
-        # Remove "Customer Name" or "Customer" if it appears at the end (due to scrambled OCR)
+        # Remove "Customer Name" or "Customer" if it appears at the beginning or end (due to scrambled OCR)
+        customer_name = re.sub(r'^Customer\s*Name?\s*[:=]?\s*', '', customer_name, flags=re.I).strip()
         customer_name = re.sub(r'\s+Customer\s*Name?.*$', '', customer_name, flags=re.I).strip()
 
-        # Remove other field labels that might have been included
+        # Remove other field labels that might have been included at the end
         customer_name = re.sub(r'\s+(?:Reference|Ref\.?|Address|Tel|Phone|Fax|Email|Attended|Kind|Code|PI|Date|Cust|Del\.|Type|Qty|Rate|Value)\b.*$', '', customer_name, flags=re.I).strip()
 
         # Validate: customer name should have company indicators or be reasonably formatted
